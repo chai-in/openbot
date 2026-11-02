@@ -436,6 +436,22 @@ try {
     valid.text,
   );
 
+  const beforeTransfer = assignmentsOf(writer.id).length;
+  const transferred = await callTool("valid transfer", channelId, lead.id, "channel_transfer", {
+    recipientAgentId: writer.id,
+    task: "Finish the release notes.",
+    expectedResult: "A complete list of notes.",
+    sourceMessageIds: [sourceMessageId],
+  });
+  pass(
+    "A valid transfer still creates the recipient assignment",
+    !transferred.fault &&
+      transferred.success &&
+      transferred.text.includes('"accepted":true') &&
+      assignmentsOf(writer.id).length > beforeTransfer,
+    transferred.text,
+  );
+
   // 6. send_message to an unknown agent in a direct chat turn (a channel thread refuses it earlier).
   const queued = () => agents.listQueue(lead.id).deliveries.length + agents.listQueue(writer.id).deliveries.length;
   const queuedBefore = queued();

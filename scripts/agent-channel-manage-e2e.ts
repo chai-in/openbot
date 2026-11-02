@@ -148,6 +148,10 @@ process.stdin.on("data", (chunk) => {
 
 /** The arguments the fake passes to the channel tool. */
 interface ChannelToolArgs {
+  recipientAgentId?: string;
+  task?: string;
+  expectedResult?: string;
+  sourceMessageIds?: string[];
   requestId?: string;
   channelId?: string;
   memberAgentIds?: string[];
@@ -512,6 +516,60 @@ try {
     "The lead can be cleared",
     clearLead.success && channelOf(directChannel.id).leadAgentId === null,
     clearLead.text,
+  );
+  // Use the same channel that the direct tools created and changed. Handoffs must still enforce
+  // its current membership, and return reasons the provider can read instead of JSON-RPC faults.
+  const handoff = { recipientAgentId: writer.id, task: "Draft notes.", expectedResult: "Release notes." };
+  const missingSources = await callTool("missing sources", directChannel.id, lead.id, "channel_assign", handoff);
+  pass(
+    "A channel created from chat returns a correctable handoff refusal",
+    missingSources.success &&
+      missingSources.text.includes('"accepted":false') &&
+      missingSources.text.includes("sourceMessageIds"),
+    missingSources.text,
+  );
+  const sourceId = channels()
+    .store.messages(directChannel.id)
+    .find((entry) => entry.message.author === "user")?.id;
+  assert.ok(sourceId);
+  for (const tool of ["channel_assign", "channel_transfer"]) {
+    const removed = await callTool("removed member", directChannel.id, lead.id, tool, {
+      ...handoff,
+      recipientAgentId: tester.id,
+      sourceMessageIds: [sourceId],
+    });
+    pass(
+      `${tool} refuses a member removed by the direct tool`,
+      removed.success && removed.text.includes('"accepted":false') && removed.text.includes("available member"),
+      removed.text,
+    );
+    await runCauseEffect(agents.setAgentHidden({ agentId: writer.id, hidden: true }));
+    const hiddenMember = await callTool("hidden member", directChannel.id, lead.id, tool, {
+      ...handoff,
+      sourceMessageIds: [sourceId],
+    });
+    pass(
+      `${tool} refuses a hidden member without a provider fault`,
+      hiddenMember.success && hiddenMember.text.includes('"accepted":false'),
+      hiddenMember.text,
+    );
+    await runCauseEffect(agents.setAgentHidden({ agentId: writer.id, hidden: false }));
+  }
+  pass(
+    "Refused handoffs create no recipient assignment",
+    channels()
+      .store.assignments(directChannel.id)
+      .every((assignment) => assignment.agentId === lead.id),
+  );
+  const badRecipient = await callDirectTool(lead.id, "send_message", {
+    recipientAgentIds: [writer.id, "missing-agent"],
+    text: "An invalid recipient must refuse the whole send.",
+    expectsReply: false,
+  });
+  pass(
+    "A direct chat still receives a correctable agent-ID error",
+    !badRecipient.success && badRecipient.text.includes("openbot.list_agents"),
+    badRecipient.text,
   );
   await runCauseEffect(
     channels().command({ type: "archive", operationId: randomUUID(), channelId: directChannel.id }, PERSON),

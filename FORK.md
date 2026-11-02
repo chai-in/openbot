@@ -36,6 +36,25 @@ Changes use the existing channel command queue and store an activity note in the
 Removing a member keeps the service's existing task pause behavior. Archived channels
 cannot be edited. No database migration or released IPC or Team API change is required.
 
+## Command discovery, channel handoffs and routine inspection
+
+This fork also includes these upstream fixes, with their original commit authors preserved:
+
+- [#4315](https://github.com/nightly-labs/openbot/pull/4315),
+  `97e290ef9082f30e6c753d48d4b351df3cd096af`: isolate executable and PATH output from
+  login-shell profile output, including control sequences with no trailing newline.
+- [#3871](https://github.com/nightly-labs/openbot/pull/3871),
+  `a22bba5fae846e19b8015d21859797d887114259`: return readable handoff and agent-ID
+  refusals so an agent can correct its request. Invalid recipients do not receive messages.
+- [#4542](https://github.com/nightly-labs/openbot/pull/4542),
+  `a02584b72426c37d748efcba07ee18c8fa8a32bd`: allow a routine run to list routines.
+  Its prompt still prohibits creating, updating, deleting and testing routines during the run.
+  That prohibition is model guidance, not a new server authorization boundary.
+
+These changes add no runtime dependencies or database migration.
+The main-branch CI deployment and pull-request preview jobs are restricted to the upstream
+repository. These integration events in the fork cannot run those deployments.
+
 ## Verification
 
 Install the pinned dependencies with `bun install --frozen-lockfile` and run
@@ -43,6 +62,16 @@ Install the pinned dependencies with `bun install --frozen-lockfile` and run
 temporary profile with a scripted provider. Its report is written to
 `.openbot-build/agent-channel-manage-e2e/report.json`. It uses no live account, real chat or running
 desktop profile. The existing CI selection runs this check.
+
+The combined channel check also tests handoffs after direct-chat membership changes, hidden
+recipients, assignment and transfer refusals, and readable agent-ID errors. Run
+`bun run test:channel-handoff-validation` for valid handoffs and all-or-nothing recipient checks,
+and `bun run test:routine-report-failure` for routine listing and the retained prompt prohibition.
+
+Run `bun scripts/mcp-noisy-shell-e2e.ts` for command discovery. On macOS it checks a fake shell
+and the real `/bin/zsh`, with clean and noisy temporary profiles in separate processes. It does
+not change the user's shell profiles. Each case resolves the command and PATH and launches the
+fixture executable. Other platforms run the fake-shell case.
 
 Run `bun run typecheck:node` for backend changes and Biome on the changed files.
 This work does not replace an installed OpenBot application or publish a desktop release.
