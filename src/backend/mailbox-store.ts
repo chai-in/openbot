@@ -434,6 +434,32 @@ export class MailboxStore {
     return message?.messaging ? structuredClone(message.messaging) : null;
   }
 
+  /** The host-stamped person behind a direct-chat turn. Never infer authority from message text. */
+  directChatRequester(agentId: string, turnId: string): ConversationMessageSender | null {
+    const deliveries = this.#state.deliveries.filter(
+      (delivery) =>
+        delivery.recipientAgentId === agentId &&
+        delivery.turnId === turnId &&
+        (delivery.status === "starting" || delivery.status === "running"),
+    );
+    if (deliveries.length === 0) return null;
+    let person: ConversationMessageSender | undefined;
+    for (const delivery of deliveries) {
+      const message = this.#state.messages.find((item) => item.id === delivery.messageId);
+      if (
+        message?.sender.kind !== "user" ||
+        !message.senderMember ||
+        message.channelId ||
+        message.messaging ||
+        message.taskId
+      )
+        return null;
+      if (person && person.id !== message.senderMember.id) return null;
+      person = message.senderMember;
+    }
+    return person ? { ...person } : null;
+  }
+
   /**
    * The external conversation an agent's answer goes back to: the one the request was sent from,
    * when the answer goes to the agent that sent it and to no one else. Every delivery of a message

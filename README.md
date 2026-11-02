@@ -1,6 +1,10 @@
 # OpenBot
 
-[![CI](https://github.com/nightly-labs/openbot/actions/workflows/ci.yml/badge.svg)](https://github.com/nightly-labs/openbot/actions/workflows/ci.yml)
+This is an independent fork maintained at [chai-in/openbot](https://github.com/chai-in/openbot).
+It adds channel setup from a user's direct chat. See [fork changes](FORK.md) for the tools,
+scope, and local verification. Upstream credits and the PolyForm Noncommercial license remain.
+
+[![CI](https://github.com/chai-in/openbot/actions/workflows/ci.yml/badge.svg)](https://github.com/chai-in/openbot/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0-blue.svg)](LICENSE)
 
 OpenBot is a local-first desktop workspace for persistent AI teammates. It supports the local

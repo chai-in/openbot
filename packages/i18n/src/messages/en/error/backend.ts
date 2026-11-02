@@ -1,6 +1,13 @@
 import { defineMessages } from "../../../message";
 
 export const messages = defineMessages("error.backend", {
+  "error.backend.channelDirectoryPersonRequired":
+    "Channel directory tools require a current person's message in the agent's direct chat, with access to chat with that agent.",
+  "error.backend.channelDirectoryArchived": "This channel is archived. Restore it before changing its settings.",
+  "error.backend.channelDirectoryDraftInvalid":
+    "Provide unique channel member IDs and select a lead from those members, or no lead.",
+  "error.backend.channelDirectoryNameTaken":
+    "A channel already has this name. Use list_channels with includeArchived to find it.",
   "error.backend.eventsUnavailable": "Events are not available on this host.",
   "error.backend.databaseIntegrity": "OpenBot database failed its integrity check.",
   "error.backend.webhookRouteLimit": "A host can have at most {limit} webhook routines.",

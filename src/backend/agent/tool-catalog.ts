@@ -61,7 +61,7 @@ export const VISIBLE_TOOL_DEFINITIONS = [
   ...OPENBOT_TOOL_DEFINITIONS.filter((tool) => DIRECT_NAMES.has(tool.name)),
   {
     name: "tool_search",
-    description: `Find built-in tools by keywords or qualified name. Pass queries (an array) or query (one string). Returns names and short descriptions, default 5, maximum 10. The strongest matches also include inputSchema and guidance, ready for tool_call. Describe other results before first use. Catalog: ${INITIAL_TOOL_CATALOG}`,
+    description: `Find tools by keywords or qualified name: queries array or query string. Default 5, max 10 results. Top matches include inputSchema and guidance for tool_call; describe others before use. Catalog: ${INITIAL_TOOL_CATALOG}`,
     shape: searchShape,
   },
   {

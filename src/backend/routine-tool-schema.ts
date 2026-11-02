@@ -67,7 +67,7 @@ export const routineScheduleZodSchema = z
  * that leans on the chat ("check the mail as before") leaves the run without the way to do it.
  */
 export const ROUTINE_INSTRUCTION_RULE =
-  "Each run starts a new session that sees only the newest chat messages, so write an instruction that a reader with no chat can follow. Name the service and the tool to use, such as openbot_browser for a website with the site and its signed-in tab, or the MCP tool or teammate. Also name the account, the steps, what to report and where, and when to report nothing. Do not write 'as before' or refer to the chat.";
+  "Runs start fresh sessions with only recent messages. Write a self-contained instruction: service, tool or teammate, account, steps, report content and destination, and silence conditions. For websites, name openbot_browser, the site and signed-in tab. Never refer to earlier chat or say 'as before'.";
 
 export const routineInstructionZodSchema = z
   .string()
@@ -77,14 +77,12 @@ export const routineInstructionZodSchema = z
 
 export const routineLimitPolicyZodSchema = z
   .enum(ROUTINE_LIMIT_POLICIES)
-  .describe(
-    "What a run does while the agent's provider account is at its usage limit: wait runs it after the reset, skip drops it. New routines use wait. A one-time schedule always uses wait.",
-  );
+  .describe("At the provider usage limit: wait until reset (default), or skip the run. Once schedules always wait.");
 
 export const routineMissedPolicyZodSchema = z
   .enum(ROUTINE_MISSED_POLICIES)
   .describe(
-    "What the routine does with occurrences that came due while OpenBot or its server was off: skip records and drops them, run-once runs the newest one when OpenBot starts and records the others. When a routine is created with no value, a one-time schedule uses run-once and other schedules use skip. An update with no value keeps the saved policy.",
+    "Runs missed while OpenBot/server was off: skip records and drops all; run-once runs the newest on startup and records the rest. Creation defaults: once uses run-once, others skip. Omit on update to keep the policy.",
   );
 
 export const webhookEventTypeZodSchema = z

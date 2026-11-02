@@ -1,6 +1,8 @@
 import { defineMessages } from "../../../message";
 
 export const messages = defineMessages("status.agent", {
+  "status.agent.channelCreatedFromChat": "{agent} created this channel. {person} asked for it.",
+  "status.agent.channelUpdatedFromChat": "{agent} changed this channel's settings. {person} asked for it.",
   "status.agent.claudeWriteOutside":
     "Write {path}, outside the agent's workspace, the shared folder and the temporary folders.",
   "status.agent.contextCleared": "Context cleared. A new chat starts here.",

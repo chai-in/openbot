@@ -446,6 +446,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:agent-channel-manage
 
+      - name: Run the channel handoff validation E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:channel-handoff-validation
+
       - name: Run the agent profile accounts E2E test
         if: ${{ !cancelled() }}
         run: bun run test:agent-profile-accounts
@@ -485,6 +489,10 @@ jobs:
       - name: Run the agent MCP server tools E2E test
         if: ${{ !cancelled() }}
         run: bun run test:agent-mcp-tools
+
+      - name: Run the MCP noisy shell E2E test
+        if: ${{ !cancelled() }}
+        run: bun scripts/mcp-noisy-shell-e2e.ts
 
       - name: Run the MCP sign-in client refusal E2E test
         if: ${{ !cancelled() }}
@@ -578,6 +586,7 @@ jobs:
             .openbot-build/routine-report-failure-e2e/
             .openbot-build/agent-webhook-routine-e2e/
             .openbot-build/agent-channel-manage-e2e/
+            .openbot-build/channel-handoff-validation-e2e/
             .openbot-build/agent-profile-accounts-e2e/
             .openbot-build/browser-profile-agents-e2e/
             .openbot-build/claude-usage-resume-e2e/
@@ -945,7 +954,8 @@ jobs:
 
   deploy-production:
     name: Deploy Cloudflare production
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Fork integration must never deploy the upstream production services.
+    if: github.repository == 'nightly-labs/openbot' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     # `surfaces` gates the deploy even though the Worker it ships lives in
     # `apps/auth-api`, which `api` already covers: mobile, the site router, the
     # team client and the remote stack all consume the account API, so a red
