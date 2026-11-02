@@ -75,6 +75,10 @@ function browserGuidance(tool: string, options: ToolGuidanceOptions): string[] {
 function openbotGuidance(namespace: string, tool: string): string {
   if (namespace !== "openbot") return "";
   switch (tool) {
+    case "list_channels":
+    case "create_channel":
+    case "update_channel":
+      return "Use these tools for channel setup requested by a person in your direct chat. List channels before creating one, and resolve member IDs with list_agents. Reuse the same requestId when retrying a creation. Creating a channel sends no messages and starts no work. Keep private direct-chat history out of its title and instructions. To change membership, send the full requested member list; do not remove unseen members. In an active channel task, use its scoped channel_ tools instead. Routine, teammate and external messaging turns cannot use directory tools.";
     case "list_tables":
     case "query_data":
     case "execute_data":

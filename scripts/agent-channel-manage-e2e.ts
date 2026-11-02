@@ -31,6 +31,7 @@ process.env.OPENBOT_CODEX_PATH = fakeCodex;
 mkdirSync(home, { recursive: true });
 
 const { AgentService } = await import("../src/backend/agent-service");
+const { ChannelDirectoryTools } = await import("../src/backend/channel-directory-tools");
 const { AgentStore } = await import("../src/backend/agent-store");
 const { runCauseEffect } = await import("../src/backend/effect-boundary");
 const { MailboxStore } = await import("../src/backend/mailbox-store");
@@ -41,6 +42,7 @@ const PERSON = { id: "local", name: "Alex" };
 // A team member whose roles do not let them chat with the agents they ask to add.
 const LIMITED = { id: "member-limited", name: "Rui" };
 let limitedVisibleAgentId = "";
+let limitedCallerAgentId = "";
 
 /**
  * A Codex app-server with the methods that the service calls. A turn whose input has
@@ -97,9 +99,10 @@ const answer = (message) => {
       const match = calls.at(-1);
       if (!match) return setTimeout(() => finish(params.threadId, turnId), 20);
       const id = "tool-" + turnId;
-      waiting.set(id, { threadId: params.threadId, turnId });
       // The packet carries the request as JSON text, so its quotes arrive escaped.
       const { __tool, ...args } = JSON.parse(match[1].replace(/\\\\"/g, '"'));
+      if (__tool === "send_message" && args.text?.startsWith("ENCODED:")) args.text = Buffer.from(args.text.slice(8), "base64").toString("utf8");
+      waiting.set(id, { threadId: params.threadId, turnId, tool: __tool });
       return write({
         id,
         method: "item/tool/call",
@@ -108,8 +111,8 @@ const answer = (message) => {
           turnId,
           callId: "call-" + turnId,
           namespace: "openbot",
-          tool: "tool_call",
-          arguments: { name: "openbot." + __tool, arguments: args },
+          tool: ["tool_search", "tool_describe"].includes(__tool) ? __tool : "tool_call",
+          arguments: ["tool_search", "tool_describe"].includes(__tool) ? args : { name: "openbot." + __tool, arguments: args },
         },
       });
     }
@@ -134,7 +137,7 @@ process.stdin.on("data", (chunk) => {
       else if (!message.method && waiting.has(message.id)) {
         const turn = waiting.get(message.id);
         waiting.delete(message.id);
-        log({ turnId: turn.turnId, result: message.result ?? null, error: message.error ?? null });
+        log({ tool: turn.tool, turnId: turn.turnId, result: message.result ?? null, error: message.error ?? null });
         finish(turn.threadId, turn.turnId);
       }
     }
@@ -145,6 +148,14 @@ process.stdin.on("data", (chunk) => {
 
 /** The arguments the fake passes to the channel tool. */
 interface ChannelToolArgs {
+  requestId?: string;
+  channelId?: string;
+  memberAgentIds?: string[];
+  leadAgentId?: string | null;
+  query?: string;
+  includeArchived?: boolean;
+  limit?: number;
+  offset?: number;
   agentId?: string;
   instructions?: string;
   routineId?: string;
@@ -152,9 +163,13 @@ interface ChannelToolArgs {
   instruction?: string;
   schedule?: { kind: "daily"; time: string } | { kind: "once"; date: string; time: string };
   active?: boolean;
+  recipientAgentIds?: string[];
+  text?: string;
+  expectsReply?: boolean;
 }
 
 interface ToolLog {
+  tool: string;
   turnId: string;
   result: { success: boolean; contentItems: { type: string; text: string }[] } | null;
   error: unknown;
@@ -228,7 +243,13 @@ const agents = new AgentService({
   timezone: () => "UTC",
   // The limited member sees Tester but cannot chat with it, and does not see the other agents.
   channelPersonAgentLevel: (personId, agentId) =>
-    personId !== LIMITED.id ? "manage" : agentId === limitedVisibleAgentId ? "view" : "none",
+    personId !== LIMITED.id
+      ? "manage"
+      : agentId === limitedCallerAgentId
+        ? "chat"
+        : agentId === limitedVisibleAgentId
+          ? "view"
+          : "none",
   channelRemotePerson: (personId) => personId === LIMITED.id,
 });
 
@@ -282,6 +303,39 @@ async function callTool(
   return { success: entry.result?.success === true, text };
 }
 
+/** Exercise discovery and dispatch from a real direct-chat delivery with host-stamped identity. */
+async function callDirectTool(
+  agentId: string,
+  tool: string,
+  args: ChannelToolArgs,
+  person: { id: string; name: string } | null = PERSON,
+) {
+  const before = toolLogs().length;
+  await runCauseEffect(
+    agents.sendMessage(
+      {
+        agentId,
+        text: `${CALL_MARK} <<ARGS${JSON.stringify({ __tool: tool, ...args })}ARGS>>`,
+        attachmentDraftIds: [],
+      },
+      person ?? undefined,
+    ),
+  );
+  const entry = await waitFor(`${tool} direct tool result`, () =>
+    toolLogs()
+      .slice(before)
+      .find((entry) => entry.tool === tool),
+  );
+  await waitFor("the direct turn to end", () =>
+    agents
+      .listQueue(agentId)
+      .deliveries.every((delivery) => !["queued", "starting", "running"].includes(delivery.status)),
+  );
+  const text = entry.result?.contentItems.map((item) => item.text).join("\n") ?? JSON.stringify(entry.error);
+  report.calls.push({ name: `direct ${tool}`, turnId: entry.turnId, success: entry.result?.success ?? null, text });
+  return { success: entry.result?.success === true, text };
+}
+
 function lastNote(channelId: string): ChannelMessage | undefined {
   return notes(channelId).at(-1);
 }
@@ -308,6 +362,248 @@ try {
   const lead = await create("Lead");
   const tester = await create("Tester");
   const writer = await create("Writer");
+  limitedCallerAgentId = lead.id;
+  limitedVisibleAgentId = tester.id;
+  const discovered = await callDirectTool(lead.id, "tool_search", { query: "create_channel" });
+  pass(
+    "Channel creation is discoverable",
+    discovered.success && discovered.text.includes("openbot.create_channel"),
+    discovered.text,
+  );
+  const draft = {
+    requestId: "release-request",
+    name: "release-planning",
+    memberAgentIds: [lead.id, tester.id],
+    leadAgentId: lead.id,
+    instructions: "Private channel instructions.",
+  };
+  const createdFromChat = await callDirectTool(lead.id, "create_channel", draft);
+  const directChannel = channels()
+    .store.list(PERSON.id)
+    .find((channel) => channel.name === draft.name);
+  pass(
+    "A direct chat creates the channel",
+    createdFromChat.success && directChannel?.members.length === 2,
+    createdFromChat.text,
+  );
+  assert.ok(directChannel);
+  pass(
+    "Creation has a visible attribution",
+    lastNote(directChannel.id)?.message.text === "Lead created this channel. Alex asked for it.",
+  );
+  pass("Creation starts no work", channels().store.tasks(directChannel.id).length === 0);
+  const retry = await callDirectTool(lead.id, "create_channel", draft);
+  pass(
+    "Creation retry returns the same channel without a second note",
+    retry.success &&
+      retry.text.includes(directChannel.id) &&
+      notes(directChannel.id).length === 1 &&
+      channels().store.list(PERSON.id).length === 1,
+    retry.text,
+  );
+  const duplicateName = await callDirectTool(lead.id, "create_channel", {
+    ...draft,
+    requestId: "another-request",
+    name: " RELEASE-PLANNING ",
+  });
+  pass(
+    "A normalized duplicate name is refused",
+    !duplicateName.success &&
+      duplicateName.text.includes("already has this name") &&
+      channels().store.list(PERSON.id).length === 1,
+    duplicateName.text,
+  );
+  for (const invalid of [
+    { ...draft, requestId: "duplicate-member", name: "duplicate-member", memberAgentIds: [lead.id, lead.id] },
+    { ...draft, requestId: "unknown-member", name: "unknown-member", memberAgentIds: [lead.id, "missing-agent"] },
+    { ...draft, requestId: "invalid-lead", name: "invalid-lead", leadAgentId: writer.id },
+  ]) {
+    const rejected = await callDirectTool(lead.id, "create_channel", invalid);
+    pass(
+      `Invalid ${invalid.requestId} cannot create a channel`,
+      !rejected.success && channels().store.list(PERSON.id).length === 1,
+      rejected.text,
+    );
+  }
+  const listedChannels = await callDirectTool(lead.id, "list_channels", { query: "release", limit: 1 });
+  pass(
+    "Channel listing returns IDs without transcript or instructions",
+    listedChannels.success &&
+      listedChannels.text.includes(directChannel.id) &&
+      !listedChannels.text.includes(draft.instructions) &&
+      !listedChannels.text.includes("Alex asked"),
+    listedChannels.text,
+  );
+  const limitedList = await callDirectTool(lead.id, "list_channels", {}, LIMITED);
+  pass("Listing works for a person with chat access to the caller", limitedList.success, limitedList.text);
+  limitedCallerAgentId = "";
+  const revoked = await callDirectTool(lead.id, "list_channels", {}, LIMITED);
+  pass(
+    "Revoked caller access is checked when the tool runs",
+    !revoked.success && revoked.text.includes("access to chat"),
+    revoked.text,
+  );
+  limitedCallerAgentId = lead.id;
+  const denied = await callDirectTool(
+    lead.id,
+    "create_channel",
+    { ...draft, requestId: "limited-create", name: "limited-create" },
+    LIMITED,
+  );
+  pass(
+    "Creation cannot add a view-only member",
+    !denied.success && channels().store.list(PERSON.id).length === 1,
+    denied.text,
+  );
+  const unseenMember = await callDirectTool(
+    lead.id,
+    "update_channel",
+    { channelId: directChannel.id, memberAgentIds: [lead.id, tester.id, writer.id] },
+    LIMITED,
+  );
+  pass(
+    "A direct update cannot add an inaccessible member",
+    !unseenMember.success && channelOf(directChannel.id).members.length === 2,
+    unseenMember.text,
+  );
+  const updated = await callDirectTool(lead.id, "update_channel", {
+    channelId: directChannel.id,
+    memberAgentIds: [lead.id, writer.id],
+    leadAgentId: writer.id,
+  });
+  pass(
+    "A direct update changes members and lead and preserves omitted fields",
+    updated.success &&
+      channelOf(directChannel.id).leadAgentId === writer.id &&
+      channelOf(directChannel.id).instructions === draft.instructions &&
+      !channelOf(directChannel.id).members.some((member) => member.agentId === tester.id),
+    updated.text,
+  );
+  const filtered = await callDirectTool(lead.id, "list_channels", {}, LIMITED);
+  pass(
+    "Listing omits inaccessible members and lead",
+    filtered.success && !filtered.text.includes(writer.id),
+    filtered.text,
+  );
+  const removeInvisible = await callDirectTool(
+    lead.id,
+    "update_channel",
+    { channelId: directChannel.id, memberAgentIds: [lead.id], leadAgentId: null },
+    LIMITED,
+  );
+  pass(
+    "Replacing members cannot remove an inaccessible member",
+    !removeInvisible.success && channelOf(directChannel.id).members.length === 2,
+    removeInvisible.text,
+  );
+  const clearUnseenLead = await callDirectTool(
+    lead.id,
+    "update_channel",
+    { channelId: directChannel.id, leadAgentId: null },
+    LIMITED,
+  );
+  pass(
+    "A person cannot clear an unseen lead",
+    !clearUnseenLead.success && channelOf(directChannel.id).leadAgentId === writer.id,
+    clearUnseenLead.text,
+  );
+  const clearLead = await callDirectTool(lead.id, "update_channel", { channelId: directChannel.id, leadAgentId: null });
+  pass(
+    "The lead can be cleared",
+    clearLead.success && channelOf(directChannel.id).leadAgentId === null,
+    clearLead.text,
+  );
+  await runCauseEffect(
+    channels().command({ type: "archive", operationId: randomUUID(), channelId: directChannel.id }, PERSON),
+  );
+  const archivedUpdate = await callDirectTool(lead.id, "update_channel", {
+    channelId: directChannel.id,
+    name: "changed",
+  });
+  pass(
+    "An archived channel cannot change",
+    !archivedUpdate.success && channelOf(directChannel.id).name === draft.name,
+    archivedUpdate.text,
+  );
+  const archivedList = await callDirectTool(lead.id, "list_channels", {});
+  const includedArchive = await callDirectTool(lead.id, "list_channels", { includeArchived: true });
+  pass(
+    "Archived channels are opt-in in the list",
+    archivedList.success &&
+      !archivedList.text.includes(directChannel.id) &&
+      includedArchive.success &&
+      includedArchive.text.includes(directChannel.id),
+  );
+  const missingUpdate = await callDirectTool(lead.id, "update_channel", {
+    channelId: "missing-channel",
+    name: "missing",
+  });
+  pass(
+    "Updating a missing channel cannot create it",
+    !missingUpdate.success && !channels().store.exists("missing-channel"),
+    missingUpdate.text,
+  );
+
+  const noIdentity = await callDirectTool(lead.id, "list_channels", {}, null);
+  pass(
+    "A message without host-stamped identity is refused",
+    !noIdentity.success && noIdentity.text.includes("current person's message"),
+    noIdentity.text,
+  );
+  pass(
+    "A completed turn grants no authority",
+    mailbox.directChatRequester(lead.id, report.calls[1]?.turnId ?? "") === null,
+  );
+  await runCauseEffect(agents.setAgentHidden({ agentId: tester.id, hidden: true }));
+  const hidden = await callDirectTool(lead.id, "create_channel", {
+    ...draft,
+    requestId: "hidden-create",
+    name: "hidden-create",
+  });
+  pass("A hidden agent cannot be added", !hidden.success && channels().store.list(PERSON.id).length === 1, hidden.text);
+  await runCauseEffect(agents.setAgentHidden({ agentId: tester.id, hidden: false }));
+
+  const directoryRoutine = agents.createRoutine({
+    agentId: lead.id,
+    name: "Directory routine",
+    instruction: `${CALL_MARK} <<ARGS${JSON.stringify({ __tool: "create_channel", ...draft, name: "routine-create", requestId: "routine-create" })}ARGS>>`,
+    active: false,
+    timezone: "UTC",
+    schedule: { kind: "daily", time: "09:00" },
+  });
+  const beforeRoutine = toolLogs().length;
+  await runCauseEffect(agents.testRoutine({ agentId: lead.id, routineId: directoryRoutine.id }));
+  const routineCall = await waitFor("directory routine refusal", () => toolLogs()[beforeRoutine]);
+  pass(
+    "A direct routine cannot create a channel",
+    routineCall.result?.success === false && channels().store.list(PERSON.id).length === 1,
+  );
+  await waitFor("directory routine to settle", () =>
+    agents
+      .listQueue(lead.id)
+      .deliveries.every((delivery) => !["queued", "starting", "running"].includes(delivery.status)),
+  );
+  const beforeTeammate = toolLogs().length;
+  await callDirectTool(writer.id, "send_message", {
+    recipientAgentIds: [lead.id],
+    text: `ENCODED:${Buffer.from(`${CALL_MARK} <<ARGS${JSON.stringify({ __tool: "create_channel", ...draft, name: "teammate-create", requestId: "teammate-create" })}ARGS>>`).toString("base64")}`,
+    expectsReply: false,
+  });
+  const teammateCall = await waitFor("directory teammate refusal", () =>
+    toolLogs()
+      .slice(beforeTeammate)
+      .find((entry) => entry.tool === "create_channel"),
+  );
+  pass(
+    "A teammate request cannot create a channel",
+    teammateCall.result?.success === false && channels().store.list(PERSON.id).length === 1,
+  );
+  await waitFor("teammate request to settle", () =>
+    agents
+      .listQueue(lead.id)
+      .deliveries.every((delivery) => !["queued", "starting", "running"].includes(delivery.status)),
+  );
+
   const channelId = randomUUID();
   await runCauseEffect(
     channels().command(
@@ -325,6 +621,13 @@ try {
       },
       PERSON,
     ),
+  );
+
+  const directoryFromChannel = await callTool("directory from channel", channelId, lead.id, "list_channels", {});
+  pass(
+    "A channel task cannot use direct-chat directory tools",
+    !directoryFromChannel.success,
+    directoryFromChannel.text,
   );
 
   // 1. Add a member.
@@ -528,6 +831,122 @@ try {
 
   pass("Each change has one note", notes(channelId).length === 7);
   report.notes = notes(channelId).map((entry) => entry.message.text);
+  // Concurrent directory requests use the real channel queue and persistent receipts.
+  const directory = new ChannelDirectoryTools(channels());
+  const parallelDraft = { name: "parallel-create", requestId: "parallel-one", memberAgentIds: [lead.id] };
+  const concurrent = await Promise.allSettled([
+    runCauseEffect(directory.handle("create_channel", parallelDraft, lead.id, PERSON, "parallel-one")),
+    runCauseEffect(
+      directory.handle(
+        "create_channel",
+        { ...parallelDraft, requestId: "parallel-two" },
+        writer.id,
+        PERSON,
+        "parallel-two",
+      ),
+    ),
+  ]);
+  const concurrentChannels = channels()
+    .store.list(PERSON.id)
+    .filter((channel) => channel.name === parallelDraft.name);
+  pass(
+    "Concurrent duplicate names create exactly one channel",
+    concurrent.filter((result) => result.status === "fulfilled").length === 1 && concurrentChannels.length === 1,
+  );
+  const concurrentChannel = concurrentChannels[0];
+  assert.ok(concurrentChannel);
+  await runCauseEffect(
+    directory.handle(
+      "update_channel",
+      { channelId: concurrentChannel.id, title: "Later change" },
+      lead.id,
+      PERSON,
+      "later-edit",
+    ),
+  );
+  const retried = new ChannelDirectoryTools(channels());
+  const winningAgent = concurrent[0]?.status === "fulfilled" ? lead.id : writer.id;
+  const winningRequest = concurrent[0]?.status === "fulfilled" ? "parallel-one" : "parallel-two";
+  await runCauseEffect(
+    retried.handle("create_channel", { ...parallelDraft, requestId: winningRequest }, winningAgent, PERSON, "new-call"),
+  );
+  pass(
+    "A new tool instance reuses the stored receipt and preserves later edits",
+    channelOf(concurrentChannel.id).title === "Later change" && notes(concurrentChannel.id).length === 2,
+  );
+  const page = await runCauseEffect(directory.handle("list_channels", { limit: 1 }, lead.id, PERSON, "page-one"));
+  assert.ok("channels" in page);
+  const next = await runCauseEffect(
+    directory.handle("list_channels", { limit: 1, offset: page.nextOffset }, lead.id, PERSON, "page-two"),
+  );
+  assert.ok("channels" in next);
+  pass(
+    "Directory pages are bounded and do not repeat entries",
+    page.channels.length === 1 &&
+      page.nextOffset === 1 &&
+      next.channels.length === 1 &&
+      page.channels[0]?.id !== next.channels[0]?.id,
+  );
+  // Exercise host-stamped origins in a separate real mailbox, without a provider or live profile.
+  const identityRoot = join(root, "identity-check");
+  const identityDatabase = new OpenBotDatabase(identityRoot);
+  const identityMailbox = new MailboxStore(identityRoot, join(identityRoot, "shared"), identityDatabase);
+  try {
+    await runCauseEffect(identityMailbox.initialize());
+    const deliver = async (input: Parameters<typeof identityMailbox.enqueue>[0], turnId: string) => {
+      const receipt = await runCauseEffect(identityMailbox.enqueue(input));
+      const delivery = receipt.deliveries[0];
+      assert.ok(delivery);
+      await runCauseEffect(identityMailbox.markStarting(delivery.id));
+      await runCauseEffect(identityMailbox.markRunning(delivery.id, turnId));
+      return delivery.id;
+    };
+    const userInput = {
+      sender: { kind: "user" as const },
+      senderMember: PERSON,
+      recipientAgentIds: [lead.id],
+      text: "Create a test channel.",
+    };
+    const localDelivery = await deliver(userInput, "local-turn");
+    pass(
+      "The mailbox resolves a stamped active user",
+      identityMailbox.directChatRequester(lead.id, "local-turn")?.id === PERSON.id,
+    );
+    await runCauseEffect(identityMailbox.markTerminal(localDelivery, "completed"));
+    pass(
+      "Completed mailbox deliveries cannot authorize a tool",
+      identityMailbox.directChatRequester(lead.id, "local-turn") === null,
+    );
+    await deliver(
+      {
+        ...userInput,
+        messaging: {
+          linkId: "external-link",
+          authorId: "external-person",
+          authorName: "External",
+          platformMessageId: "external-message",
+        },
+      },
+      "external-turn",
+    );
+    pass(
+      "An external origin cannot become direct-chat authority",
+      identityMailbox.directChatRequester(lead.id, "external-turn") === null,
+    );
+    await deliver({ ...userInput, taskId: "side-task" }, "side-turn");
+    pass(
+      "A side task cannot become direct-chat authority",
+      identityMailbox.directChatRequester(lead.id, "side-turn") === null,
+    );
+    await deliver(userInput, "mixed-turn");
+    await deliver({ ...userInput, senderMember: LIMITED }, "mixed-turn");
+    pass(
+      "Mixed people in one turn grant no authority",
+      identityMailbox.directChatRequester(lead.id, "mixed-turn") === null,
+    );
+  } finally {
+    identityDatabase.close();
+  }
   report.passed = true;
 } catch (error) {
   report.error = error instanceof Error ? (error.stack ?? error.message) : String(error);

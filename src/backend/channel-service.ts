@@ -226,10 +226,11 @@ export class ChannelService {
       command: ChannelCommand,
       actor: { id: string; name: string },
       beforeApply: (command: ChannelCommand) => ChannelCommand | null = (queued) => queued,
+      notes: ChannelMessage[] = [],
     ) => {
       const operation = Effect.suspend(() => {
         const next = beforeApply(command);
-        return next ? this.apply(next, actor) : channelSync(() => this.store.get(command.channelId));
+        return next ? this.apply(next, actor, notes) : channelSync(() => this.store.get(command.channelId));
       });
       return command.type === "stop" || command.type === "archive"
         ? operation

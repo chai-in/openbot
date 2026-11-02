@@ -42,6 +42,7 @@ import {
   LIST_WAITS_TOOL,
   listWaitsToolSchema,
 } from "./agent-waits/agent-waits";
+import { CHANNEL_DIRECTORY_TOOL_DEFINITIONS } from "./channel-directory-tools";
 import { CHANNEL_TOOL_DEFINITIONS } from "./channel-tools";
 import { MESSAGING_TOOL_DEFINITIONS } from "./messaging/messaging-tools";
 import { ROUTINE_FLOW_TOOL_DEFINITIONS } from "./routine-flows/routine-flow-tools";
@@ -291,6 +292,7 @@ export const MARKETPLACE_APP_IDS: readonly string[] = [
 /** Shared declarations for Codex, Grok, and Claude. Service handlers enforce execution rules. */
 export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
   ...CHANNEL_TOOL_DEFINITIONS,
+  ...CHANNEL_DIRECTORY_TOOL_DEFINITIONS,
   ...MESSAGING_TOOL_DEFINITIONS,
   ...HISTORY_TOOL_DEFINITIONS,
   ...DATA_TOOL_DEFINITIONS,

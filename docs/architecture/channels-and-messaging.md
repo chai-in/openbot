@@ -207,6 +207,16 @@ Only assignments and awaited results start turns. Completed child results are co
 owner returns. The limit is eight automatic assignments per root request and two active assignments
 per channel (`CHANNEL_PARALLEL_LIMIT`).
 
+Direct chats have separate directory tools: `list_channels`, `create_channel`, and `update_channel`
+(`channel-directory-tools.ts`). The router requires the agent's own thread and an active mailbox
+delivery from one host-stamped person. It refuses routine, teammate, side-task and external messages,
+including messages with no stored person identity. Directory writes use the channel command queue,
+validate member access again at execution, and write an activity note with the change. Creation
+derives its ID from the person, caller and request ID; a repeated receipt does not overwrite later
+edits. A directory write lock prevents concurrent directory calls from accepting the same name.
+Lists paginate metadata only and omit hidden or inaccessible members, transcripts and instructions.
+The existing UI and Team API contracts remain unchanged. See [fork changes](../../FORK.md).
+
 A member can also change its channel when a person asks: `channel_add_member`,
 `channel_remove_member`, `channel_set_instructions`, and `channel_list_routines`,
 `channel_create_routine`, `channel_update_routine`, `channel_delete_routine` for the schedule

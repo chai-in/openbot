@@ -37,6 +37,7 @@ import type { AgentStore } from "../agent-store";
 import type { AgentTasks } from "../agent-tasks/agent-tasks";
 import type { AgentWaits } from "../agent-waits/agent-waits";
 import { OPENBOT_BROWSER_NAMESPACE } from "../browser-tools";
+import { ChannelDirectoryTools, isChannelDirectoryTool } from "../channel-directory-tools";
 import type { ChannelService } from "../channel-service";
 import type { ProviderSession } from "../database/provider-sessions";
 import type { MailboxStore } from "../mailbox-store";
@@ -238,6 +239,7 @@ export class OpenBotToolRouter {
   readonly #browserUploads: BrowserUploads;
   readonly #attachments: AttachmentGateway;
   readonly #channels: ChannelService;
+  readonly #channelDirectory: ChannelDirectoryTools;
   readonly #messaging: MessagingThreads;
   readonly #hostedSites: HostedSiteCoordinator;
   readonly #routines: RoutineScheduler;
@@ -273,6 +275,7 @@ export class OpenBotToolRouter {
     this.#browserUploads = options.browserUploads;
     this.#attachments = options.attachments;
     this.#channels = options.channels;
+    this.#channelDirectory = new ChannelDirectoryTools(options.channels);
     this.#messaging = options.messaging;
     this.#hostedSites = options.hostedSites;
     this.#routines = options.routines;
@@ -519,7 +522,8 @@ export class OpenBotToolRouter {
                 if (!(error instanceof z.ZodError)) logger.warn("An OpenBot tool failed.", { tool, error: message });
                 return openBotToolFailure(message);
               });
-            const correctable = PROFILE_TOOL_NAMES.has(tool) || tool === "attach_files_to_response";
+            const correctable =
+              PROFILE_TOOL_NAMES.has(tool) || isChannelDirectoryTool(tool) || tool === "attach_files_to_response";
             const response = this.#handleOpenBotTool(toolRequest.params).pipe(
               Effect.catch((failure) => (correctable ? correctableFailure(failure.cause) : Effect.fail(failure))),
               Effect.catchDefect((defect) => (correctable ? correctableFailure(defect) : Effect.die(defect))),
@@ -816,6 +820,23 @@ export class OpenBotToolRouter {
     }
 
     const executionThreadId = this.#conversation.publicThreadId(senderAgentId, params.threadId);
+    if (isChannelDirectoryTool(params.tool)) {
+      const caller = this.#requireAgent(senderAgentId);
+      const person = this.#mailbox.directChatRequester(senderAgentId, params.turnId);
+      if (caller.threadId !== executionThreadId || !person)
+        return openBotToolFailure(sourceText("error.backend.channelDirectoryPersonRequired"));
+      const result = yield* this.#channelDirectory.handle(
+        params.tool,
+        params.arguments,
+        senderAgentId,
+        person,
+        `tool:${params.turnId}:${params.callId}`,
+      );
+      return {
+        success: true,
+        contentItems: [{ type: "inputText", text: this.#hooks.redactMcp(JSON.stringify(result)) }],
+      };
+    }
     // Any agent can post on its own initiative, such as a routine that reports to a Discord channel.
     if (MESSAGING_OUTBOUND_TOOLS.has(params.tool))
       return yield* this.#messaging.outboundTool(params.tool, params.arguments);
