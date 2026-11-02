@@ -439,13 +439,13 @@ export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
   {
     name: "list_routines",
     description:
-      "List routines for this agent, or for another local agent when agentId is provided. Use this before updating or deleting a routine. routines has the schedule routines; webhookRoutines has the webhook routines with their event type, filters and URL.",
+      "List this agent's routines, or agentId's. Read before edits/deletion. Returns routines (scheduled) and webhookRoutines (event type, filters, URL).",
     shape: { agentId: z.string().min(1).max(INPUT_LIMITS.identifier).optional() },
   },
   {
     name: "create_routine",
     description:
-      "Create a scheduled routine for this agent, or for another local agent when agentId is provided. It is active by default. Without a timezone, it uses the timezone of the person whose message this turn answers, or the server timezone when that is unknown. Interval, advanced-every, and custom schedules must not run more often than every 3 minutes. For a one-time reminder or task, use a once schedule: it runs one time and then pauses the routine. When watching a folder for new files and no interval was requested, use a 15 minute interval and keep the folder path plus handling instructions in the routine instruction.",
+      "Schedule work for this agent, or agentId's. Active by default. Timezone defaults to the current person, then the server. Interval, advanced-every and custom schedules need at least 3 minutes. For one-time work use once; it pauses after running. Folder watching defaults to 15 minutes; include path and handling in instruction.",
     shape: {
       agentId: z.string().min(1).max(INPUT_LIMITS.identifier).optional(),
       name: z.string().min(1).max(INPUT_LIMITS.routineName),
@@ -462,7 +462,7 @@ export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
   {
     name: CREATE_WEBHOOK_ROUTINE_TOOL,
     description:
-      "Create a routine that a signed HTTP request starts, for this agent or for another local agent when agentId is provided. Use it when the user wants work to start when something happens in another system. It works only in a turn that a person's message started, not in a routine run or for an agent's message. It is active by default. The result has the webhook URL and the request format. The signing secret is not in the result; the result says where the user gets it. Never ask the user for the secret. A null url means the URL is not ready yet; the Routines settings show it when it is.",
+      "Create a routine triggered by signed HTTP events for this agent, or agentId's. Requires a person's message, never routine or teammate turns. Active by default. Returns URL, request format and where the user gets the signing secret; never ask for that secret. Null URL means not ready; Routines settings will show it.",
     shape: {
       agentId: z.string().min(1).max(INPUT_LIMITS.identifier).optional(),
       name: z.string().min(1).max(INPUT_LIMITS.routineName),
@@ -482,7 +482,7 @@ export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
   {
     name: UPDATE_WEBHOOK_ROUTINE_TOOL,
     description:
-      "Change a webhook routine of this agent, or of another local agent when agentId is provided: its event type, filters, name, instruction, or pause and resume it. Get its routineId from webhookRoutines of list_routines. Fields you leave out keep their saved values; filters replaces the whole list, and an empty list removes all filters. The URL and the signing secret stay the same. It works only in a turn that a person's message started.",
+      "Edit this agent's webhook routine, or agentId's: event type, filters, name, instruction, pause/resume. Requires a person's message. Get routineId from list_routines.webhookRoutines. Omitted fields stay unchanged; filters replaces all (empty clears). URL and signing secret stay unchanged.",
     shape: {
       agentId: z.string().min(1).max(INPUT_LIMITS.identifier).optional(),
       routineId: z.string().min(1).max(INPUT_LIMITS.identifier),
@@ -497,7 +497,7 @@ export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
   {
     name: "update_routine",
     description:
-      "Update, pause, or resume an existing routine for this agent, or for another local agent when agentId is provided. Fields you leave out keep their saved values. Replacement schedules must not run more often than every 3 minutes. A one-time routine that already ran resumes only with a new once schedule in the future. The result is the saved routine. For a webhook routine, use update_webhook_routine.",
+      "Update, pause or resume this agent's routine, or agentId's. Omitted fields stay unchanged. Minimum interval: 3 minutes. A completed once routine needs a new future once schedule to resume. Returns the saved routine. For webhooks use update_webhook_routine.",
     shape: {
       agentId: z.string().min(1).max(INPUT_LIMITS.identifier).optional(),
       routineId: z.string().min(1).max(INPUT_LIMITS.identifier),

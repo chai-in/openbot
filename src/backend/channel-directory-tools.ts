@@ -41,19 +41,19 @@ export const CHANNEL_DIRECTORY_TOOL_DEFINITIONS = [
   {
     name: "list_channels",
     description:
-      "List local channel IDs, names, leads and members from a person's direct chat. Returns no messages. Search by name or title; use nextOffset for more results. Routine, teammate and external messaging turns cannot use it.",
+      "List channel IDs, names, leads and members, without messages. Search name/title; page with nextOffset. Direct user chats only.",
     shape: listSchema.shape,
   },
   {
     name: "create_channel",
     description:
-      "Create a local channel when a person asks in your direct chat. Get existing member IDs from list_agents. Supply a unique requestId and reuse it for retries of this creation. The lead must be a member. Returns the channel ID; starts no work. Duplicate names are refused. Routine, teammate and external messaging turns cannot use it.",
+      "Create a channel when requested in a direct user chat. Returns its ID; starts no work. Use a unique requestId; reuse it for retries. Lead must be a member. Duplicate names fail.",
     shape: createSchema.shape,
   },
   {
     name: "update_channel",
     description:
-      "Change a channel's name, title, instructions, members or lead when a person asks in your direct chat. Get channelId from list_channels. Omitted fields stay unchanged; memberAgentIds replaces the member list. Removing a member stops its channel tasks. Set leadAgentId to null to clear it. Archived channels cannot change. Routine, teammate and external messaging turns cannot use it.",
+      "Edit channel name, title, instructions, members or lead when requested in a direct user chat. Get channelId from list_channels. Omitted fields stay unchanged; memberAgentIds replaces all members. Removal stops their tasks. Null clears leadAgentId. Archived channels cannot change.",
     shape: updateSchema.shape,
   },
 ];
